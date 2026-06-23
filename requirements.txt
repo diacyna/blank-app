@@ -1,1 +1,10 @@
 streamlit
+pandas
+rasterio
+folium
+Pillow
+numpy
+pyproj
+matplotlib
+seaborn
+streamlit-folium
