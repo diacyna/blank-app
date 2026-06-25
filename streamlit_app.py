@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from streamlit_folium import st_folium
 import io
+import os
 
 def dm_to_dd(degrees, minutes):
     """Converts degrees and minutes to decimal degrees."""
@@ -170,11 +171,12 @@ if image_file and excel_file:
     # Create a rotated image overlay using Leaflet.ImageOverlay.Rotated.
     rotated_overlay_js = """
     L.ImageOverlay.Rotated = L.ImageOverlay.extend({
-      initialize: function (url, topleft, topright, bottomleft, options) {
+      initialize: function (url, topleft, topright, bottomleft, bottomright, options) {
         this._topleft = L.latLng(topleft);
         this._topright = L.latLng(topright);
         this._bottomleft = L.latLng(bottomleft);
-        var bounds = L.latLngBounds(this._topleft, this._bottomleft);
+        this._bottomright = L.latLng(bottomright);
+        var bounds = L.latLngBounds([this._topleft, this._topright, this._bottomleft, this._bottomright]);
         L.ImageOverlay.prototype.initialize.call(this, url, bounds, options);
       },
       _initImage: function () {
@@ -202,46 +204,139 @@ if image_file and excel_file:
         this._image.style.transform = 'matrix(' + a + ',' + b + ',' + c + ',' + d + ',' + e + ',' + f + ')';
       }
     });
-    L.imageOverlay.rotated = function (imgSrc, topleft, topright, bottomleft, options) {
-      return new L.ImageOverlay.Rotated(imgSrc, topleft, topright, bottomleft, options);
+    L.imageOverlay.rotated = function (imgSrc, topleft, topright, bottomleft, bottomright, options) {
+      return new L.ImageOverlay.Rotated(imgSrc, topleft, topright, bottomleft, bottomright, options);
     };
     """
 
-    rotated_overlay = Template(f"""
-    <script>
-    {rotated_overlay_js}
-    var imageUrl = 'data:image/png;base64,{encoded_image}';
-    var topLeft = [{top_left['lat']}, {top_left['lon']}];
-    var topRight = [{top_right['lat']}, {top_right['lon']}];
-    var bottomLeft = [{bottom_left['lat']}, {bottom_left['lon']}];
-    L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, {{opacity: 0.5}}).addTo({{this._parent.get_name()}});
-    </script>
-    """
+    formation_colors = {
+        'Treuchtlingen': '#ADD8E6',
+        'Arzberg': '#0000CD',
+        'Dietfurt': '#00008B',
+        'Segenthal': '#8B4513',
+        'Eisensandstein': '#8B0000',
+        'Opalinuston': '#C68642',
+        'Keuper': '#FF4500',
+        'Hauptmuschelkalk': '#E6A8D7',
+        'Mitllerer Muschelkalk': '#008000',
+        'Wellenkalk': '#4B0082',
+        'Oberer Buntsandstein': '#FFFF00',
+        'mitllerer buntsandstein': '#FFA500',
+    }
+
+    points_layer = folium.FeatureGroup(name='Points from Excel').add_to(m)
+    map_name = m.get_name()
+
+    rotated_overlay = Template(
+        f"""
+        <script>
+        var map = {map_name};
+        var imageUrl = 'data:image/png;base64,{encoded_image}';
+        var topLeft = [{top_left['lat']}, {top_left['lon']}];
+        var topRight = [{top_right['lat']}, {top_right['lon']}];
+        var bottomLeft = [{bottom_left['lat']}, {bottom_left['lon']}];
+        var bottomRight = [{bottom_right['lat']}, {bottom_right['lon']}];
+        {rotated_overlay_js}
+        var overlay = L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, bottomRight, {opacity: 0.5});
+        overlay.addTo(map);
+        var overlayMaps = {{'Georeferenced Screenshot': overlay}};
+        L.control.layers(null, overlayMaps, {{collapsed: false}}).addTo(map);
+        </script>
+        """
     )
 
     macro = MacroElement()
     macro._template = rotated_overlay
     m.get_root().add_child(macro)
 
-    points_layer = folium.FeatureGroup(name='Points from Excel').add_to(m)
+    m.fit_bounds([
+        [{top_left['lat']}, {top_left['lon']}],
+        [{top_right['lat']}, {top_right['lon']}],
+        [{bottom_left['lat']}, {bottom_left['lon']}],
+        [{bottom_right['lat']}, {bottom_right['lon']}]
+    ])
 
     if 'Latitude' in coordinates_df.columns and 'Longitude' in coordinates_df.columns:
         for idx, row in coordinates_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            point_name = row['Formation'] if 'Formation' in row else f"Point {idx+1}"
+            formation = row['Formation'] if 'Formation' in row else None
+            point_name = formation if formation else f"Point {idx+1}"
+            marker_color = formation_colors.get(formation, '#FF0000')
 
-            folium.Marker(
+            folium.CircleMarker(
                 location=[lat, lon],
+                radius=6,
+                color=marker_color,
+                fill=True,
+                fill_color=marker_color,
+                fill_opacity=0.9,
                 popup=point_name,
-                icon=folium.Icon(color='red')
             ).add_to(points_layer)
     else:
         st.warning("Latitude or Longitude columns not found after conversion. Skipping marker display.")
 
     folium.LayerControl().add_to(m)
 
-    st_folium(m, width=1200, height=600)
+    legend_html = """
+    <style>
+    .legend-box {display: flex; align-items: center; margin-bottom: 8px;}
+    .legend-color {width: 18px; height: 18px; margin-right: 8px; border: 1px solid #555;}
+    .legend-container {font-size: 14px; line-height: 1.6;}
+    .legend-title {font-weight: bold; margin-bottom: 10px;}
+    </style>
+    <div class='legend-container'>
+      <div class='legend-title'>Formation Legende</div>
+      <div class='legend-box'><div class='legend-color' style='background:#ADD8E6'></div>Treuchtlingen</div>
+      <div class='legend-box'><div class='legend-color' style='background:#0000CD'></div>Arzberg</div>
+      <div class='legend-box'><div class='legend-color' style='background:#00008B'></div>Dietfurt</div>
+      <div class='legend-box'><div class='legend-color' style='background:#8B4513'></div>Segenthal</div>
+      <div class='legend-box'><div class='legend-color' style='background:#8B0000'></div>Eisensandstein</div>
+      <div class='legend-box'><div class='legend-color' style='background:#C68642'></div>Opalinuston</div>
+      <div class='legend-box'><div class='legend-color' style='background:#FF4500'></div>Keuper</div>
+      <div class='legend-box'><div class='legend-color' style='background:#E6A8D7'></div>Hauptmuschelkalk</div>
+      <div class='legend-box'><div class='legend-color' style='background:#008000'></div>Mitllerer Muschelkalk</div>
+      <div class='legend-box'><div class='legend-color' style='background:#4B0082'></div>Wellenkalk</div>
+      <div class='legend-box'><div class='legend-color' style='background:#FFFF00'></div>Oberer Buntsandstein</div>
+      <div class='legend-box'><div class='legend-color' style='background:#FFA500'></div>mitllerer buntsandstein</div>
+    </div>
+    """
+
+    col_map, col_legend = st.columns([3, 1])
+    with col_map:
+        st_folium(m, width=1200, height=600)
+    with col_legend:
+        st.markdown(legend_html, unsafe_allow_html=True)
+
+    st.subheader("5. Kartiergebiet-Erklärung")
+    kartiergebiet_text = """
+    Dies ist ein Kartiergebiet bei Kirchleus! Es handelt sich dabei um stratigraphische Einheiten
+    vom Buntsandstein bis einschließlich Oberjura mit deutlichen tektonischen Strukturen.
+    Diese wurden anhand von Aufschlüssen, Lesesteinen und Messwerten bestimmt.
+    Besonders ist in diesem Gebiet eine steile Aufschiebung; entlang dieser Unterjura-Schichten
+    fehlen vollständig und Trias-Schichten folgen abrupt. Diese tektonische Überprägung wird
+    von plötzlich steilen Einfallswinkeln, Falten und sekundär gebildeten Kalziten bestätigt.
+    Die erstellte geologische Karte zeigt die räumliche Verteilung der Formationen und den
+    östlichen verlaufenden Versatz.
+    Insgesamt zeigt das Gebiet einen Teil der komplexen Bruchschollenstruktur des Fränkischen Jura.
+    """
+
+    info_image_path = "kartiergebiet.png"
+    col_desc, col_image_desc = st.columns([2, 1])
+    with col_desc:
+        st.markdown(kartiergebiet_text)
+    with col_image_desc:
+        if os.path.exists(info_image_path):
+            st.image(info_image_path, caption="Kartiergebiet", use_column_width=True)
+        else:
+            st.info("Kein erklärendes Kartiergebiet-Bild gefunden. Bitte legen Sie `kartiergebiet.png` ins Projektverzeichnis oder laden Sie eines hoch.")
+            uploaded_info_image = st.file_uploader(
+                "Optional: Kartiergebiet-Bild hochladen",
+                type=['png', 'jpg', 'jpeg'],
+                key='kartiergebiet_image_upload'
+            )
+            if uploaded_info_image:
+                st.image(Image.open(uploaded_info_image), caption="Kartiergebiet Illustration", use_column_width=True)
 
 
     ### 4. Data Exploration and Visualizations
