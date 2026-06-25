@@ -3,6 +3,7 @@ import pandas as pd
 import rasterio
 from rasterio.transform import Affine
 import folium
+from branca.element import MacroElement, Template
 from PIL import Image
 import numpy as np
 import base64
@@ -166,13 +167,61 @@ if image_file and excel_file:
     with open(output_png_path, 'rb') as image_file_read:
         encoded_image = base64.b64encode(image_file_read.read()).decode('utf-8')
 
-    image_bounds = [[south, west], [north, east]]
-    folium.raster_layers.ImageOverlay(
-        image=f"data:image/png;base64,{encoded_image}",
-        bounds=image_bounds,
-        opacity=0.5,
-        name='Georeferenced Screenshot'
-    ).add_to(m)
+    # Create a rotated image overlay using Leaflet.ImageOverlay.Rotated.
+    rotated_overlay_js = """
+    L.ImageOverlay.Rotated = L.ImageOverlay.extend({
+      initialize: function (url, topleft, topright, bottomleft, options) {
+        this._topleft = L.latLng(topleft);
+        this._topright = L.latLng(topright);
+        this._bottomleft = L.latLng(bottomleft);
+        var bounds = L.latLngBounds(this._topleft, this._bottomleft);
+        L.ImageOverlay.prototype.initialize.call(this, url, bounds, options);
+      },
+      _initImage: function () {
+        L.ImageOverlay.prototype._initImage.call(this);
+        this._image.style.position = 'absolute';
+        L.DomEvent.on(this._image, 'load', this._reset, this);
+      },
+      _reset: function () {
+        if (!this._map || !this._image) { return; }
+        var topLeft = this._map.latLngToLayerPoint(this._topleft);
+        var topRight = this._map.latLngToLayerPoint(this._topright);
+        var bottomLeft = this._map.latLngToLayerPoint(this._bottomleft);
+        var imgWidth = this._image.naturalWidth || this._image.width;
+        var imgHeight = this._image.naturalHeight || this._image.height;
+        if (!imgWidth || !imgHeight) { return; }
+        var a = (topRight.x - topLeft.x) / imgWidth;
+        var b = (topRight.y - topLeft.y) / imgWidth;
+        var c = (bottomLeft.x - topLeft.x) / imgHeight;
+        var d = (bottomLeft.y - topLeft.y) / imgHeight;
+        var e = topLeft.x;
+        var f = topLeft.y;
+        this._image.style.width = imgWidth + 'px';
+        this._image.style.height = imgHeight + 'px';
+        this._image.style.transformOrigin = '0 0';
+        this._image.style.transform = 'matrix(' + a + ',' + b + ',' + c + ',' + d + ',' + e + ',' + f + ')';
+      }
+    });
+    L.imageOverlay.rotated = function (imgSrc, topleft, topright, bottomleft, options) {
+      return new L.ImageOverlay.Rotated(imgSrc, topleft, topright, bottomleft, options);
+    };
+    """
+
+    rotated_overlay = Template(f"""
+    <script>
+    {rotated_overlay_js}
+    var imageUrl = 'data:image/png;base64,{encoded_image}';
+    var topLeft = [{top_left['lat']}, {top_left['lon']}];
+    var topRight = [{top_right['lat']}, {top_right['lon']}];
+    var bottomLeft = [{bottom_left['lat']}, {bottom_left['lon']}];
+    L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, {{opacity: 0.5}}).addTo({{this._parent.get_name()}});
+    </script>
+    """
+    )
+
+    macro = MacroElement()
+    macro._template = rotated_overlay
+    m.get_root().add_child(macro)
 
     points_layer = folium.FeatureGroup(name='Points from Excel').add_to(m)
 
