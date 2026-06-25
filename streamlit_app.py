@@ -316,6 +316,58 @@ if image_file and excel_file:
     with col_legend:
         st.markdown(legend_html, unsafe_allow_html=True)
 
+    # Debug: Prüfe Map-Objekt auf Python `set`-Instanzen (helfen beim ToJSON-Fehler)
+    try:
+        import sys
+        from collections import deque
+
+        def _find_sets(root, limit=2000):
+            seen = set()
+            q = deque([root])
+            found = []
+            while q and len(found) < limit:
+                obj = q.popleft()
+                oid = id(obj)
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                if isinstance(obj, set):
+                    found.append((type(obj).__name__, repr(obj)))
+                    continue
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if isinstance(k, set):
+                            found.append(('dict_key', repr(k)))
+                        if isinstance(v, set):
+                            found.append(('dict_val', repr(v)))
+                        q.append(k)
+                        q.append(v)
+                    continue
+                if isinstance(obj, (list, tuple)):
+                    for it in obj:
+                        if isinstance(it, set):
+                            found.append(('container', repr(it)))
+                        q.append(it)
+                    continue
+                for attr in dir(obj):
+                    if attr.startswith('__'):
+                        continue
+                    try:
+                        val = getattr(obj, attr)
+                    except Exception:
+                        continue
+                    if isinstance(val, set):
+                        found.append(('attr', type(obj).__name__, attr, repr(val)))
+                    elif isinstance(val, (list, tuple, dict)):
+                        q.append(val)
+            return found
+
+        sets_found = _find_sets(m)
+        if sets_found:
+            print('DEBUG_FOUND_SETS:', sets_found, file=sys.stderr)
+    except Exception as _dbg:
+        print('DEBUG_SEARCH_FAILED', _dbg, file=sys.stderr)
+
     st.subheader("5. Kartiergebiet-Erklärung")
     kartiergebiet_text = """
     Dies ist ein Kartiergebiet bei Kirchleus! Es handelt sich dabei um stratigraphische Einheiten
