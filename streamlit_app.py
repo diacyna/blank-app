@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import rasterio
+from rasterio.transform import Affine
 import folium
 from PIL import Image
 import numpy as np
@@ -34,24 +35,51 @@ if image_file and excel_file:
     ### 1. Georeference the Image
     st.subheader("1. Georeferencing Image")
 
-    # Define bounds (these need to be input by the user or dynamically determined for a real app)
-    st.info("For this demo, predefined coordinates (West: 11° 20', South: 50° 06', East: 11° 30', North: 50° 12') are used. In a real application, you might add input fields for these.")
-    west = dm_to_dd(11, 20)
-    south = dm_to_dd(50, 6)
-    east = dm_to_dd(11, 30)
-    north = dm_to_dd(50, 12)
+    # Define fixed corner coordinates for the new georeferencing reference
+    st.info("Using fixed image corner coordinates for the new georeferencing reference.")
+    top_left = {'lat': 50.194539, 'lon': 11.378918}
+    top_right = {'lat': 50.186503, 'lon': 11.392865}
+    bottom_left = {'lat': 50.170412, 'lon': 11.338062}
+    bottom_right = {'lat': 50.162329, 'lon': 11.349585}
 
-    st.write(f"Defined bounds: West={west}°, South={south}°, East={east}°, North={north}°")
+    st.write("Defined corner coordinates:")
+    st.write(pd.DataFrame([
+        ['Links oben', top_left['lat'], top_left['lon']],
+        ['Rechts oben', top_right['lat'], top_right['lon']],
+        ['Links unten', bottom_left['lat'], bottom_left['lon']],
+        ['Rechts unten', bottom_right['lat'], bottom_right['lon']]
+    ], columns=['Position', 'Latitude', 'Longitude']))
 
     # Load the image using Pillow
     img = Image.open(input_image_path)
     img_array = np.array(img)
 
     # Get image dimensions
-    height, width, bands = img_array.shape
+    height, width = img_array.shape[:2]
+    bands = img_array.shape[2] if img_array.ndim == 3 else 1
 
-    # Define the spatial transform for the GeoTIFF
-    transform = rasterio.transform.from_bounds(west, south, east, north, width, height)
+    # Compute an affine transform from pixel coordinates to geographic coordinates
+    # using the three known corners (top-left, top-right, bottom-left).
+    src_points = np.array([
+        [0, 0, 1],
+        [width, 0, 1],
+        [0, height, 1]
+    ], dtype=float)
+    dst_lon = np.array([top_left['lon'], top_right['lon'], bottom_left['lon']], dtype=float)
+    dst_lat = np.array([top_left['lat'], top_right['lat'], bottom_left['lat']], dtype=float)
+
+    lon_coeffs = np.linalg.solve(src_points, dst_lon)
+    lat_coeffs = np.linalg.solve(src_points, dst_lat)
+
+    transform = Affine(lon_coeffs[0], lon_coeffs[1], lon_coeffs[2],
+                       lat_coeffs[0], lat_coeffs[1], lat_coeffs[2])
+
+    west = min(top_left['lon'], bottom_left['lon'])
+    east = max(top_right['lon'], bottom_right['lon'])
+    south = min(bottom_left['lat'], bottom_right['lat'])
+    north = max(top_left['lat'], top_right['lat'])
+
+    st.write(f"Approximate rectangular bounds: West={west}°, South={south}°, East={east}°, North={north}°")
 
     # Define the Coordinate Reference System (CRS) - WGS84 for lat/lon
     crs = 'EPSG:4326'
