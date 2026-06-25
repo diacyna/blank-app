@@ -237,7 +237,7 @@ if image_file and excel_file:
         var bottomLeft = [{bottom_left['lat']}, {bottom_left['lon']}];
         var bottomRight = [{bottom_right['lat']}, {bottom_right['lon']}];
         {rotated_overlay_js}
-        var overlay = L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, bottomRight, {opacity: 0.5});
+        var overlay = L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, bottomRight, {{opacity: 0.5}});
         overlay.addTo(map);
         var overlayMaps = {{'Georeferenced Screenshot': overlay}};
         L.control.layers(null, overlayMaps, {{collapsed: false}}).addTo(map);
