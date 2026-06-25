@@ -284,7 +284,15 @@ if image_file and excel_file:
     else:
         st.warning("Latitude or Longitude columns not found after conversion. Skipping marker display.")
 
-    folium.LayerControl().add_to(m)
+    # folium.LayerControl().add_to(m)  # Temporarily disabled to debug set serialization error
+
+    # Debug: Inspect layer names to find set instances
+    print("DEBUG: Checking layer_names:")
+    for child_name, child in m._children.items():
+        if hasattr(child, 'layer_name'):
+            print(f"  {child_name}: layer_name={repr(child.layer_name)} (type={type(child.layer_name).__name__})")
+        if hasattr(child, 'overlay'):
+            print(f"  {child_name}: overlay={child.overlay}")
 
     legend_html = """
     <style>
@@ -365,6 +373,20 @@ if image_file and excel_file:
         sets_found = _find_sets(m)
         if sets_found:
             print('DEBUG_FOUND_SETS:', sets_found, file=sys.stderr)
+        # Zusätzlich: gezielt layer_name prüfen
+        try:
+            for child_name, child in m._children.items():
+                try:
+                    ln = getattr(child, 'layer_name', None)
+                except Exception:
+                    ln = '<error>'
+                if isinstance(ln, set):
+                    print('DEBUG_LAYER_SET:', child_name, type(child).__name__, repr(ln), file=sys.stderr)
+                else:
+                    # kurze Ausgabe zur Kontrolle
+                    print('DEBUG_LAYER:', child_name, type(child).__name__, type(ln).__name__, file=sys.stderr)
+        except Exception as _e:
+            print('DEBUG_LAYER_CHECK_FAILED', _e, file=sys.stderr)
     except Exception as _dbg:
         print('DEBUG_SEARCH_FAILED', _dbg, file=sys.stderr)
 
