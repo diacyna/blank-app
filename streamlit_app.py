@@ -228,21 +228,29 @@ if image_file and excel_file:
     map_name = m.get_name()
 
     rotated_overlay = Template(
-        f"""
-        <script>
-        var map = {map_name};
-        var imageUrl = 'data:image/png;base64,{encoded_image}';
-        var topLeft = [{top_left['lat']}, {top_left['lon']}];
-        var topRight = [{top_right['lat']}, {top_right['lon']}];
-        var bottomLeft = [{bottom_left['lat']}, {bottom_left['lon']}];
-        var bottomRight = [{bottom_right['lat']}, {bottom_right['lon']}];
-        {rotated_overlay_js}
-        var overlay = L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, bottomRight, {{opacity: 0.5}});
-        overlay.addTo(map);
-        var overlayMaps = {{'Georeferenced Screenshot': overlay}};
-        L.control.layers(null, overlayMaps, {{collapsed: false}}).addTo(map);
-        </script>
         """
+        <script>
+        var map = %s;
+        var imageUrl = 'data:image/png;base64,%s';
+        var topLeft = [%s, %s];
+        var topRight = [%s, %s];
+        var bottomLeft = [%s, %s];
+        var bottomRight = [%s, %s];
+        %s
+        var overlay = L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, bottomRight, {opacity: 0.5});
+        overlay.addTo(map);
+        var overlayMaps = {'Georeferenced Screenshot': overlay};
+        L.control.layers(null, overlayMaps, {collapsed: false}).addTo(map);
+        </script>
+        """ % (
+            map_name,
+            encoded_image,
+            top_left['lat'], top_left['lon'],
+            top_right['lat'], top_right['lon'],
+            bottom_left['lat'], bottom_left['lon'],
+            bottom_right['lat'], bottom_right['lon'],
+            rotated_overlay_js,
+        )
     )
 
     macro = MacroElement()
