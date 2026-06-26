@@ -341,8 +341,99 @@ if image_file and excel_file:
     """
 
     col_map, col_legend = st.columns([3, 1])
+
+    # Sanitize Folium map object: replace any Python `set` instances in attributes
+    # with lists so Jinja2/JSON serialization does not fail. Also provide a
+    # diagnostic routine that records the path to any set found for debugging.
+    def _sanitize_sets_in_obj(obj, path=(), seen=None, found=None):
+        if seen is None:
+            seen = set()
+        if found is None:
+            found = []
+        oid = id(obj)
+        if oid in seen:
+            return found
+        seen.add(oid)
+        if isinstance(obj, set):
+            found.append((path, obj))
+            return found
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                key_path = path + (f"dict_key({repr(k)})",)
+                if isinstance(k, set):
+                    found.append((key_path, k))
+                    newk = tuple(k)
+                    obj[newk] = obj.pop(k)
+                    k = newk
+                val_path = path + (f"dict_val({repr(k)})",)
+                if isinstance(v, set):
+                    found.append((val_path, v))
+                    obj[k] = list(v)
+                else:
+                    _sanitize_sets_in_obj(v, val_path, seen, found)
+            return found
+        if isinstance(obj, (list, tuple)):
+            for i, it in enumerate(obj):
+                _sanitize_sets_in_obj(it, path + (f'[{i}]',), seen, found)
+            return found
+        # For objects, inspect __dict__ where possible
+        try:
+            for attr, val in list(getattr(obj, '__dict__', {}).items()):
+                attr_path = path + (f"attr.{attr}",)
+                if isinstance(val, set):
+                    found.append((attr_path, val))
+                    try:
+                        setattr(obj, attr, list(val))
+                    except Exception:
+                        pass
+                else:
+                    _sanitize_sets_in_obj(val, attr_path, seen, found)
+        except Exception:
+            pass
+        return found
+
+    # Run sanitization across map children and record any sets found
+    found_sets = []
+    for name, child in list(m._children.items()):
+        found_sets.extend(_sanitize_sets_in_obj(child, path=(f'child:{name}',)))
+    if found_sets:
+        import sys
+        for p, s in found_sets:
+            try:
+                print('SANITIZE_FOUND_SET at ' + '/'.join(p) + f' => {repr(s)}', file=sys.stderr)
+            except Exception:
+                print('SANITIZE_FOUND_SET (unprintable) at ' + '/'.join(p), file=sys.stderr)
     with col_map:
-        st_folium(m, width=1200, height=600)
+        # Render the folium map with a guarded approach so we can capture
+        # and display detailed diagnostics if JSON serialization fails.
+        import streamlit.components.v1 as components
+        try:
+            html = m.get_root().render()
+            components.html(html, height=600)
+        except Exception as _e:
+            import traceback, sys
+            tb = traceback.format_exc()
+            st.error("Fehler beim Rendern der Karte: " + str(_e))
+            st.text("--- Traceback ---")
+            st.text(tb)
+
+            # Run sanitization/diagnostics again and show findings to the user
+            try:
+                found_sets = []
+                for name, child in list(m._children.items()):
+                    found_sets.extend(_sanitize_sets_in_obj(child, path=(f'child:{name}',)))
+                if found_sets:
+                    st.warning("Gefundene Python `set`-Instanzen in Map-Objekt:")
+                    for p, s in found_sets:
+                        try:
+                            st.write({'path': '/'.join(p), 'value_repr': repr(s)})
+                        except Exception:
+                            st.write({'path': '/'.join(p), 'value_repr': '<unprintable>'})
+                else:
+                    st.info("Keine `set`-Instanzen gefunden. Weitere Diagnose erforderlich.")
+            except Exception as _d:
+                st.text("Fehler während Diagnose: " + repr(_d))
+            st.stop()
     with col_legend:
         st.markdown(legend_html, unsafe_allow_html=True)
 
