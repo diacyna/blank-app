@@ -280,10 +280,10 @@ if image_file and excel_file:
     m.get_root().add_child(macro)
 
     m.fit_bounds([
-        [{top_left['lat']}, {top_left['lon']}],
-        [{top_right['lat']}, {top_right['lon']}],
-        [{bottom_left['lat']}, {bottom_left['lon']}],
-        [{bottom_right['lat']}, {bottom_right['lon']}]
+        [top_left['lat'], top_left['lon']],
+        [top_right['lat'], top_right['lon']],
+        [bottom_left['lat'], bottom_left['lon']],
+        [bottom_right['lat'], bottom_right['lon']]
     ])
 
     if 'Latitude' in coordinates_df.columns and 'Longitude' in coordinates_df.columns:
