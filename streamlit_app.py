@@ -36,13 +36,35 @@ if image_file and excel_file:
 
     ### 1. Georeference the Image
     st.subheader("1. Georeferencing Image")
+    st.info("Start fresh by entering the four image corner coordinates manually.")
 
-    # Define fixed corner coordinates for the new georeferencing reference
-    st.info("Using fixed image corner coordinates for the new georeferencing reference.")
-    top_left = {'lat': 50.194539, 'lon': 11.378918}
-    top_right = {'lat': 50.186503, 'lon': 11.392865}
-    bottom_left = {'lat': 50.170412, 'lon': 11.338062}
-    bottom_right = {'lat': 50.162329, 'lon': 11.349585}
+    with st.form("georef_coordinates"):
+        st.write("Enter the corner coordinates for the image (latitude/longitude).")
+        col1, col2 = st.columns(2)
+        with col1:
+            top_left_lat = st.text_input("Top Left Latitude", value="50.2", placeholder="e.g. 50.2")
+            bottom_left_lat = st.text_input("Bottom Left Latitude", value="50.1", placeholder="e.g. 50.1")
+            top_left_lon = st.text_input("Top Left Longitude", value="11.3333", placeholder="e.g. 11.3333")
+            bottom_left_lon = st.text_input("Bottom Left Longitude", value="11.3333", placeholder="e.g. 11.3333")
+        with col2:
+            top_right_lat = st.text_input("Top Right Latitude", value="50.2", placeholder="e.g. 50.2")
+            bottom_right_lat = st.text_input("Bottom Right Latitude", value="50.1", placeholder="e.g. 50.1")
+            top_right_lon = st.text_input("Top Right Longitude", value="11.5", placeholder="e.g. 11.5")
+            bottom_right_lon = st.text_input("Bottom Right Longitude", value="11.5", placeholder="e.g. 11.5")
+        submitted = st.form_submit_button("Use these coordinates")
+
+    if not submitted:
+        st.info("No georeferencing coordinates were submitted yet. The app is waiting for the four corner values.")
+        st.stop()
+
+    try:
+        top_left = {'lat': float(top_left_lat), 'lon': float(top_left_lon)}
+        top_right = {'lat': float(top_right_lat), 'lon': float(top_right_lon)}
+        bottom_left = {'lat': float(bottom_left_lat), 'lon': float(bottom_left_lon)}
+        bottom_right = {'lat': float(bottom_right_lat), 'lon': float(bottom_right_lon)}
+    except ValueError:
+        st.error("Please enter valid numeric values for all corner coordinates.")
+        st.stop()
 
     st.write("Defined corner coordinates:")
     st.write(pd.DataFrame([
