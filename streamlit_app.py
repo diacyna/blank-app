@@ -13,6 +13,7 @@ import seaborn as sns
 from streamlit_folium import st_folium
 import io
 import os
+import difflib
 import plotly.express as px
 
 formation_colors = {
@@ -30,6 +31,8 @@ formation_colors = {
     'Mittlerer Buntsandstein': '#FFA500',
 }
 
+canonical_formations = list(formation_colors.keys())
+
 formation_aliases = {
     'mittlerer muschelkalk': 'Mittlerer Muschelkalk',
     'mitllerer muschelkalk': 'Mittlerer Muschelkalk',
@@ -44,7 +47,28 @@ def normalize_formation(name):
     text = str(name).strip()
     if not text:
         return None
-    return formation_aliases.get(text.lower(), text)
+    normalized_text = formation_aliases.get(text.lower(), text)
+    if normalized_text in canonical_formations:
+        return normalized_text
+    lower = normalized_text.lower()
+    for canonical in canonical_formations:
+        if lower.replace(' ', '') == canonical.lower().replace(' ', ''):
+            return canonical
+    best_match = None
+    best_ratio = 0.0
+    for canonical in canonical_formations:
+        ratio = difflib.SequenceMatcher(None, lower, canonical.lower()).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = canonical
+    return best_match if best_match is not None else None
+
+
+def get_formation_color(name):
+    if name is None or pd.isna(name):
+        return '#7F7F7F'
+    normalized = normalize_formation(name)
+    return formation_colors.get(normalized, '#7F7F7F')
 
 
 def dm_to_dd(degrees, minutes):
@@ -222,82 +246,18 @@ if image_file and excel_file:
 
     m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
 
-    with open(output_png_path, 'rb') as image_file_read:
-        encoded_image = base64.b64encode(image_file_read.read()).decode('utf-8')
+    overlay_bounds = [[south, west], [north, east]]
+    folium.raster_layers.ImageOverlay(
+        name='Georeferenced Screenshot',
+        image=output_png_path,
+        bounds=overlay_bounds,
+        opacity=0.5,
+        interactive=True,
+        cross_origin=False,
+        zindex=1,
+    ).add_to(m)
 
-    # Create a rotated image overlay using Leaflet.ImageOverlay.Rotated.
-    rotated_overlay_js = """
-    L.ImageOverlay.Rotated = L.ImageOverlay.extend({
-      initialize: function (url, topleft, topright, bottomleft, bottomright, options) {
-        this._topleft = L.latLng(topleft);
-        this._topright = L.latLng(topright);
-        this._bottomleft = L.latLng(bottomleft);
-        this._bottomright = L.latLng(bottomright);
-        var bounds = L.latLngBounds([this._topleft, this._topright, this._bottomleft, this._bottomright]);
-        L.ImageOverlay.prototype.initialize.call(this, url, bounds, options);
-      },
-      _initImage: function () {
-        L.ImageOverlay.prototype._initImage.call(this);
-        this._image.style.position = 'absolute';
-        L.DomEvent.on(this._image, 'load', this._reset, this);
-      },
-      _reset: function () {
-        if (!this._map || !this._image) { return; }
-        var topLeft = this._map.latLngToLayerPoint(this._topleft);
-        var topRight = this._map.latLngToLayerPoint(this._topright);
-        var bottomLeft = this._map.latLngToLayerPoint(this._bottomleft);
-        var imgWidth = this._image.naturalWidth || this._image.width;
-        var imgHeight = this._image.naturalHeight || this._image.height;
-        if (!imgWidth || !imgHeight) { return; }
-        var a = (topRight.x - topLeft.x) / imgWidth;
-        var b = (topRight.y - topLeft.y) / imgWidth;
-        var c = (bottomLeft.x - topLeft.x) / imgHeight;
-        var d = (bottomLeft.y - topLeft.y) / imgHeight;
-        var e = topLeft.x;
-        var f = topLeft.y;
-        this._image.style.width = imgWidth + 'px';
-        this._image.style.height = imgHeight + 'px';
-        this._image.style.transformOrigin = '0 0';
-        this._image.style.transform = 'matrix(' + a + ',' + b + ',' + c + ',' + d + ',' + e + ',' + f + ')';
-      }
-    });
-    L.imageOverlay.rotated = function (imgSrc, topleft, topright, bottomleft, bottomright, options) {
-      return new L.ImageOverlay.Rotated(imgSrc, topleft, topright, bottomleft, bottomright, options);
-    };
-    """
-
-    points_layer = folium.FeatureGroup(name='Points from Excel').add_to(m)
-    map_name = m.get_name()
-
-    rotated_overlay = Template(
-        """
-        <script>
-        var map = %s;
-        var imageUrl = 'data:image/png;base64,%s';
-        var topLeft = [%s, %s];
-        var topRight = [%s, %s];
-        var bottomLeft = [%s, %s];
-        var bottomRight = [%s, %s];
-        %s
-        var overlay = L.imageOverlay.rotated(imageUrl, topLeft, topRight, bottomLeft, bottomRight, {opacity: 0.5});
-        overlay.addTo(map);
-        var overlayMaps = {'Georeferenced Screenshot': overlay};
-        L.control.layers(null, overlayMaps, {collapsed: false}).addTo(map);
-        </script>
-        """ % (
-            map_name,
-            encoded_image,
-            top_left['lat'], top_left['lon'],
-            top_right['lat'], top_right['lon'],
-            bottom_left['lat'], bottom_left['lon'],
-            bottom_right['lat'], bottom_right['lon'],
-            rotated_overlay_js,
-        )
-    )
-
-    macro = MacroElement()
-    macro._template = rotated_overlay
-    m.get_root().add_child(macro)
+    folium.LayerControl(collapsed=False).add_to(m)
 
     m.fit_bounds([
         [top_left['lat'], top_left['lon']],
@@ -312,7 +272,7 @@ if image_file and excel_file:
             lon = row['Longitude']
             formation = normalize_formation(row['Formation']) if 'Formation' in row else None
             point_name = formation if formation else f"Point {idx+1}"
-            marker_color = formation_colors.get(formation, '#FF0000')
+            marker_color = get_formation_color(formation)
 
             folium.CircleMarker(
                 location=[lat, lon],
@@ -336,7 +296,7 @@ if image_file and excel_file:
         if hasattr(child, 'overlay'):
             print(f"  {child_name}: overlay={child.overlay}")
 
-    legend_items = list(formation_colors.items())
+    legend_items = [(formation, formation_colors[formation]) for formation in canonical_formations]
     legend_html = """
     <style>
     .legend-box {display: flex; align-items: center; margin-bottom: 8px;}
@@ -446,7 +406,8 @@ if image_file and excel_file:
                 st.text("Fehler während Diagnose: " + repr(_d))
             st.stop()
     with col_legend:
-        st.markdown(legend_html, unsafe_allow_html=True)
+        import streamlit.components.v1 as components
+        components.html(legend_html, height=max(200, 40 * len(legend_items)), scrolling=True)
 
     # Debug: Prüfe Map-Objekt auf Python `set`-Instanzen (helfen beim ToJSON-Fehler)
     try:
@@ -534,15 +495,13 @@ if image_file and excel_file:
     with col_image_desc:
         if os.path.exists(info_image_path):
             st.image(info_image_path, caption="Kartiergebiet", use_column_width=True)
-        else:
-            st.info("Kein erklärendes Kartiergebiet-Bild gefunden. Bitte legen Sie `kartiergebiet.png` ins Projektverzeichnis oder laden Sie eines hoch.")
-            uploaded_info_image = st.file_uploader(
-                "Optional: Kartiergebiet-Bild hochladen",
-                type=['png', 'jpg', 'jpeg'],
-                key='kartiergebiet_image_upload'
-            )
-            if uploaded_info_image:
-                st.image(Image.open(uploaded_info_image), caption="Kartiergebiet Illustration", use_column_width=True)
+        uploaded_info_image = st.file_uploader(
+            "Optional: Kartiergebiet-Bild hochladen",
+            type=['png', 'jpg', 'jpeg'],
+            key='kartiergebiet_image_upload'
+        )
+        if uploaded_info_image:
+            st.image(Image.open(uploaded_info_image), caption="Kartiergebiet Illustration", use_column_width=True)
 
 
     ### 4. Data Exploration and Visualizations
@@ -554,8 +513,7 @@ if image_file and excel_file:
         all_formation_counts.columns = ['Formation', 'Häufigkeit']
 
         observed_formations = [formation for formation in coordinates_df['Formation'].dropna().unique().tolist() if formation]
-        ordered_formations = [f for f in formation_colors.keys() if f in observed_formations]
-        ordered_formations += sorted([f for f in observed_formations if f not in formation_colors])
+        ordered_formations = [f for f in canonical_formations if f in observed_formations]
 
         show_all_formations = st.checkbox('Alle Formationen anzeigen', value=True, help='Wähle alle verfügbaren Formationen für die Diagramme aus.')
         selected_formations = ordered_formations if show_all_formations else st.multiselect(
@@ -570,7 +528,7 @@ if image_file and excel_file:
         if selected_formations:
             filtered_all_counts = all_formation_counts[all_formation_counts['Formation'].isin(selected_formations)].copy()
             filtered_all_counts = filtered_all_counts.sort_values('Formation', key=lambda s: s.map({formation: index for index, formation in enumerate(selected_formations)}))
-            color_map = {formation: formation_colors.get(formation, '#7F7F7F') for formation in filtered_all_counts['Formation']}
+            color_map = {formation: get_formation_color(formation) for formation in filtered_all_counts['Formation']}
 
             fig_all = px.bar(
                 filtered_all_counts,
@@ -596,7 +554,7 @@ if image_file and excel_file:
                     formation_counts.columns = ['Formation', 'Häufigkeit']
                     filtered_aufschluss_counts = formation_counts[formation_counts['Formation'].isin(selected_formations)].copy()
                     filtered_aufschluss_counts = filtered_aufschluss_counts.sort_values('Formation', key=lambda s: s.map({formation: index for index, formation in enumerate(selected_formations)}))
-                    color_map_aufschluss = {formation: formation_colors.get(formation, '#7F7F7F') for formation in filtered_aufschluss_counts['Formation']}
+                    color_map_aufschluss = {formation: get_formation_color(formation) for formation in filtered_aufschluss_counts['Formation']}
 
                     fig1 = px.bar(
                         filtered_aufschluss_counts,
