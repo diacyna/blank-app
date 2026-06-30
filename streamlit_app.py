@@ -245,6 +245,7 @@ if image_file and excel_file:
     center_lon = (east + west) / 2
 
     m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
+    points_layer = folium.FeatureGroup(name='Points from Excel').add_to(m)
 
     overlay_bounds = [[south, west], [north, east]]
     folium.raster_layers.ImageOverlay(
