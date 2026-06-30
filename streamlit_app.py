@@ -24,11 +24,28 @@ formation_colors = {
     'Opalinuston': '#C68642',
     'Keuper': '#FF4500',
     'Hauptmuschelkalk': '#E6A8D7',
-    'Mitllerer Muschelkalk': '#008000',
+    'Mittlerer Muschelkalk': '#008000',
     'Wellenkalk': '#4B0082',
     'Oberer Buntsandstein': '#FFFF00',
-    'mitllerer buntsandstein': '#FFA500',
+    'Mittlerer Buntsandstein': '#FFA500',
 }
+
+formation_aliases = {
+    'mittlerer muschelkalk': 'Mittlerer Muschelkalk',
+    'mitllerer muschelkalk': 'Mittlerer Muschelkalk',
+    'mittlerer buntsandstein': 'Mittlerer Buntsandstein',
+    'mitllerer buntsandstein': 'Mittlerer Buntsandstein',
+}
+
+
+def normalize_formation(name):
+    if pd.isna(name):
+        return None
+    text = str(name).strip()
+    if not text:
+        return None
+    return formation_aliases.get(text.lower(), text)
+
 
 def dm_to_dd(degrees, minutes):
     """Converts degrees and minutes to decimal degrees."""
@@ -163,6 +180,8 @@ if image_file and excel_file:
 
     if 'UTM Zone' in coordinates_df.columns and 'Easting' in coordinates_df.columns and 'Northing' in coordinates_df.columns:
         try:
+            if 'Formation' in coordinates_df.columns:
+                coordinates_df['Formation'] = coordinates_df['Formation'].apply(normalize_formation)
             utm_zone_str = coordinates_df['UTM Zone'].iloc[0]
             zone_number = int(utm_zone_str[:-1])
             hemisphere = 'north' if utm_zone_str[-1].upper() >= 'N' else 'south'
@@ -291,7 +310,7 @@ if image_file and excel_file:
         for idx, row in coordinates_df.iterrows():
             lat = row['Latitude']
             lon = row['Longitude']
-            formation = row['Formation'] if 'Formation' in row else None
+            formation = normalize_formation(row['Formation']) if 'Formation' in row else None
             point_name = formation if formation else f"Point {idx+1}"
             marker_color = formation_colors.get(formation, '#FF0000')
 
@@ -317,6 +336,7 @@ if image_file and excel_file:
         if hasattr(child, 'overlay'):
             print(f"  {child_name}: overlay={child.overlay}")
 
+    legend_items = list(formation_colors.items())
     legend_html = """
     <style>
     .legend-box {display: flex; align-items: center; margin-bottom: 8px;}
@@ -326,20 +346,10 @@ if image_file and excel_file:
     </style>
     <div class='legend-container'>
       <div class='legend-title'>Formation Legende</div>
-      <div class='legend-box'><div class='legend-color' style='background:#ADD8E6'></div>Treuchtlingen</div>
-      <div class='legend-box'><div class='legend-color' style='background:#0000CD'></div>Arzberg</div>
-      <div class='legend-box'><div class='legend-color' style='background:#00008B'></div>Dietfurt</div>
-      <div class='legend-box'><div class='legend-color' style='background:#8B4513'></div>Segenthal</div>
-      <div class='legend-box'><div class='legend-color' style='background:#8B0000'></div>Eisensandstein</div>
-      <div class='legend-box'><div class='legend-color' style='background:#C68642'></div>Opalinuston</div>
-      <div class='legend-box'><div class='legend-color' style='background:#FF4500'></div>Keuper</div>
-      <div class='legend-box'><div class='legend-color' style='background:#E6A8D7'></div>Hauptmuschelkalk</div>
-      <div class='legend-box'><div class='legend-color' style='background:#008000'></div>Mitllerer Muschelkalk</div>
-      <div class='legend-box'><div class='legend-color' style='background:#4B0082'></div>Wellenkalk</div>
-      <div class='legend-box'><div class='legend-color' style='background:#FFFF00'></div>Oberer Buntsandstein</div>
-      <div class='legend-box'><div class='legend-color' style='background:#FFA500'></div>mitllerer buntsandstein</div>
-    </div>
-    """
+"""
+    for name, color in legend_items:
+        legend_html += f"      <div class='legend-box'><div class='legend-color' style='background:{color}'></div>{name}</div>\n"
+    legend_html += "</div>\n"
 
     col_map, col_legend = st.columns([3, 1])
 
@@ -538,17 +548,24 @@ if image_file and excel_file:
     ### 4. Data Exploration and Visualizations
     st.subheader("4. Data Visualizations")
 
-    if 'Aufschlusswand?' in coordinates_df.columns and 'Formation' in coordinates_df.columns:
+    if 'Formation' in coordinates_df.columns:
+        coordinates_df['Formation'] = coordinates_df['Formation'].apply(normalize_formation)
         all_formation_counts = coordinates_df['Formation'].value_counts().reset_index()
         all_formation_counts.columns = ['Formation', 'Häufigkeit']
 
-        available_formations = sorted([formation for formation in all_formation_counts['Formation'].dropna().tolist() if formation])
-        selected_formations = st.multiselect(
+        observed_formations = [formation for formation in coordinates_df['Formation'].dropna().unique().tolist() if formation]
+        ordered_formations = [f for f in formation_colors.keys() if f in observed_formations]
+        ordered_formations += sorted([f for f in observed_formations if f not in formation_colors])
+
+        show_all_formations = st.checkbox('Alle Formationen anzeigen', value=True, help='Wähle alle verfügbaren Formationen für die Diagramme aus.')
+        selected_formations = ordered_formations if show_all_formations else st.multiselect(
             'Formationen anzeigen',
-            options=available_formations,
-            default=available_formations,
+            options=ordered_formations,
+            default=ordered_formations,
             help='Wähle aus, welche Formationen in den Diagrammen sichtbar sein sollen.'
         )
+        if show_all_formations:
+            st.caption(f"{len(ordered_formations)} Formationen gefunden.")
 
         if selected_formations:
             filtered_all_counts = all_formation_counts[all_formation_counts['Formation'].isin(selected_formations)].copy()
@@ -572,33 +589,34 @@ if image_file and excel_file:
             fig_all.update_traces(marker_line_width=0)
             st.plotly_chart(fig_all, use_container_width=True, key='all-formations-chart')
 
-            aufschlusswand_df = coordinates_df[coordinates_df['Aufschlusswand?'] == 'Ja']
-            if not aufschlusswand_df.empty:
-                formation_counts = aufschlusswand_df['Formation'].value_counts().reset_index()
-                formation_counts.columns = ['Formation', 'Häufigkeit']
-                filtered_aufschluss_counts = formation_counts[formation_counts['Formation'].isin(selected_formations)].copy()
-                filtered_aufschluss_counts = filtered_aufschluss_counts.sort_values('Formation', key=lambda s: s.map({formation: index for index, formation in enumerate(selected_formations)}))
-                color_map_aufschluss = {formation: formation_colors.get(formation, '#7F7F7F') for formation in filtered_aufschluss_counts['Formation']}
+            if 'Aufschlusswand?' in coordinates_df.columns:
+                aufschlusswand_df = coordinates_df[coordinates_df['Aufschlusswand?'] == 'Ja']
+                if not aufschlusswand_df.empty:
+                    formation_counts = aufschlusswand_df['Formation'].value_counts().reset_index()
+                    formation_counts.columns = ['Formation', 'Häufigkeit']
+                    filtered_aufschluss_counts = formation_counts[formation_counts['Formation'].isin(selected_formations)].copy()
+                    filtered_aufschluss_counts = filtered_aufschluss_counts.sort_values('Formation', key=lambda s: s.map({formation: index for index, formation in enumerate(selected_formations)}))
+                    color_map_aufschluss = {formation: formation_colors.get(formation, '#7F7F7F') for formation in filtered_aufschluss_counts['Formation']}
 
-                fig1 = px.bar(
-                    filtered_aufschluss_counts,
-                    x='Formation',
-                    y='Häufigkeit',
-                    color='Formation',
-                    color_discrete_map=color_map_aufschluss,
-                    title='Häufigkeit von Aufschlusswänden pro Formation',
-                    labels={'Formation': 'Formation', 'Häufigkeit': 'Anzahl der Aufschlusswände'}
-                )
-                fig1.update_layout(
-                    xaxis={'categoryorder': 'array', 'categoryarray': selected_formations},
-                    template='plotly_white',
-                    legend_title_text='Formation'
-                )
-                fig1.update_traces(marker_line_width=0)
-                st.plotly_chart(fig1, use_container_width=True, key='aufschluss-formations-chart')
-            else:
-                st.info("Keine Daten für 'Aufschlusswand?' == 'Ja' verfügbar.")
+                    fig1 = px.bar(
+                        filtered_aufschluss_counts,
+                        x='Formation',
+                        y='Häufigkeit',
+                        color='Formation',
+                        color_discrete_map=color_map_aufschluss,
+                        title='Häufigkeit von Aufschlusswänden pro Formation',
+                        labels={'Formation': 'Formation', 'Häufigkeit': 'Anzahl der Aufschlusswände'}
+                    )
+                    fig1.update_layout(
+                        xaxis={'categoryorder': 'array', 'categoryarray': selected_formations},
+                        template='plotly_white',
+                        legend_title_text='Formation'
+                    )
+                    fig1.update_traces(marker_line_width=0)
+                    st.plotly_chart(fig1, use_container_width=True, key='aufschluss-formations-chart')
+                else:
+                    st.info("Keine Daten für 'Aufschlusswand?' == 'Ja' verfügbar.")
         else:
             st.info('Bitte mindestens eine Formation auswählen, um die Diagramme anzuzeigen.')
     else:
-        st.warning("Columns 'Aufschlusswand?' or 'Formation' not found in Excel file. Skipping visualizations.")
+        st.warning("Columns 'Formation' not found in Excel file. Skipping visualizations.")
