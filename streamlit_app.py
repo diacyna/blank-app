@@ -13,6 +13,22 @@ import seaborn as sns
 from streamlit_folium import st_folium
 import io
 import os
+import plotly.express as px
+
+formation_colors = {
+    'Treuchtlingen': '#ADD8E6',
+    'Arzberg': '#0000CD',
+    'Dietfurt': '#00008B',
+    'Segenthal': '#8B4513',
+    'Eisensandstein': '#8B0000',
+    'Opalinuston': '#C68642',
+    'Keuper': '#FF4500',
+    'Hauptmuschelkalk': '#E6A8D7',
+    'Mitllerer Muschelkalk': '#008000',
+    'Wellenkalk': '#4B0082',
+    'Oberer Buntsandstein': '#FFFF00',
+    'mitllerer buntsandstein': '#FFA500',
+}
 
 def dm_to_dd(degrees, minutes):
     """Converts degrees and minutes to decimal degrees."""
@@ -230,21 +246,6 @@ if image_file and excel_file:
       return new L.ImageOverlay.Rotated(imgSrc, topleft, topright, bottomleft, bottomright, options);
     };
     """
-
-    formation_colors = {
-        'Treuchtlingen': '#ADD8E6',
-        'Arzberg': '#0000CD',
-        'Dietfurt': '#00008B',
-        'Segenthal': '#8B4513',
-        'Eisensandstein': '#8B0000',
-        'Opalinuston': '#C68642',
-        'Keuper': '#FF4500',
-        'Hauptmuschelkalk': '#E6A8D7',
-        'Mitllerer Muschelkalk': '#008000',
-        'Wellenkalk': '#4B0082',
-        'Oberer Buntsandstein': '#FFFF00',
-        'mitllerer buntsandstein': '#FFA500',
-    }
 
     points_layer = folium.FeatureGroup(name='Points from Excel').add_to(m)
     map_name = m.get_name()
@@ -538,30 +539,66 @@ if image_file and excel_file:
     st.subheader("4. Data Visualizations")
 
     if 'Aufschlusswand?' in coordinates_df.columns and 'Formation' in coordinates_df.columns:
-        aufschlusswand_df = coordinates_df[coordinates_df['Aufschlusswand?'] == 'Ja']
-        if not aufschlusswand_df.empty:
-            formation_counts = aufschlusswand_df['Formation'].value_counts().reset_index()
-            formation_counts.columns = ['Formation', 'Häufigkeit']
-
-            fig1, ax1 = plt.subplots(figsize=(12, 7))
-            sns.barplot(x='Häufigkeit', y='Formation', data=formation_counts, palette='viridis', ax=ax1)
-            ax1.set_title('Häufigkeit von Aufschlusswänden pro Formation')
-            ax1.set_xlabel('Anzahl der Aufschlusswände')
-            ax1.set_ylabel('Formation')
-            ax1.grid(axis='x', linestyle='--', alpha=0.7)
-            st.pyplot(fig1)
-        else:
-            st.info("No data available for 'Aufschlusswand?' == 'Ja' to plot.")
-
         all_formation_counts = coordinates_df['Formation'].value_counts().reset_index()
         all_formation_counts.columns = ['Formation', 'Häufigkeit']
 
-        fig2, ax2 = plt.subplots(figsize=(12, 7))
-        sns.barplot(x='Häufigkeit', y='Formation', data=all_formation_counts, palette='viridis', ax=ax2)
-        ax2.set_title('Häufigkeit aller Formationen')
-        ax2.set_xlabel('Anzahl der Vorkommen')
-        ax2.set_ylabel('Formation')
-        ax2.grid(axis='x', linestyle='--', alpha=0.7)
-        st.pyplot(fig2)
+        available_formations = sorted([formation for formation in all_formation_counts['Formation'].dropna().tolist() if formation])
+        selected_formations = st.multiselect(
+            'Formationen anzeigen',
+            options=available_formations,
+            default=available_formations,
+            help='Wähle aus, welche Formationen in den Diagrammen sichtbar sein sollen.'
+        )
+
+        if selected_formations:
+            filtered_all_counts = all_formation_counts[all_formation_counts['Formation'].isin(selected_formations)].copy()
+            filtered_all_counts = filtered_all_counts.sort_values('Formation', key=lambda s: s.map({formation: index for index, formation in enumerate(selected_formations)}))
+            color_map = {formation: formation_colors.get(formation, '#7F7F7F') for formation in filtered_all_counts['Formation']}
+
+            fig_all = px.bar(
+                filtered_all_counts,
+                x='Formation',
+                y='Häufigkeit',
+                color='Formation',
+                color_discrete_map=color_map,
+                title='Häufigkeit aller Formationen',
+                labels={'Formation': 'Formation', 'Häufigkeit': 'Anzahl der Vorkommen'}
+            )
+            fig_all.update_layout(
+                xaxis={'categoryorder': 'array', 'categoryarray': selected_formations},
+                template='plotly_white',
+                legend_title_text='Formation'
+            )
+            fig_all.update_traces(marker_line_width=0)
+            st.plotly_chart(fig_all, use_container_width=True, key='all-formations-chart')
+
+            aufschlusswand_df = coordinates_df[coordinates_df['Aufschlusswand?'] == 'Ja']
+            if not aufschlusswand_df.empty:
+                formation_counts = aufschlusswand_df['Formation'].value_counts().reset_index()
+                formation_counts.columns = ['Formation', 'Häufigkeit']
+                filtered_aufschluss_counts = formation_counts[formation_counts['Formation'].isin(selected_formations)].copy()
+                filtered_aufschluss_counts = filtered_aufschluss_counts.sort_values('Formation', key=lambda s: s.map({formation: index for index, formation in enumerate(selected_formations)}))
+                color_map_aufschluss = {formation: formation_colors.get(formation, '#7F7F7F') for formation in filtered_aufschluss_counts['Formation']}
+
+                fig1 = px.bar(
+                    filtered_aufschluss_counts,
+                    x='Formation',
+                    y='Häufigkeit',
+                    color='Formation',
+                    color_discrete_map=color_map_aufschluss,
+                    title='Häufigkeit von Aufschlusswänden pro Formation',
+                    labels={'Formation': 'Formation', 'Häufigkeit': 'Anzahl der Aufschlusswände'}
+                )
+                fig1.update_layout(
+                    xaxis={'categoryorder': 'array', 'categoryarray': selected_formations},
+                    template='plotly_white',
+                    legend_title_text='Formation'
+                )
+                fig1.update_traces(marker_line_width=0)
+                st.plotly_chart(fig1, use_container_width=True, key='aufschluss-formations-chart')
+            else:
+                st.info("Keine Daten für 'Aufschlusswand?' == 'Ja' verfügbar.")
+        else:
+            st.info('Bitte mindestens eine Formation auswählen, um die Diagramme anzuzeigen.')
     else:
         st.warning("Columns 'Aufschlusswand?' or 'Formation' not found in Excel file. Skipping visualizations.")
